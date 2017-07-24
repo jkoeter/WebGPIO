@@ -5,61 +5,64 @@ import os
 import datetime
 import time
 app = Flask(__name__)
-
-
-roomName = ['Bed Room', 'Server Room']
-accName= [['Fan', 'Front Light', 'Back Light', 'Bright Light'], ['Champ']]
-outPin = [[6, 13, 19, 26],[]]
+#app.config['LOGGER_HANDLER_POLICY'] = 'debug'
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
-for i in range(len(outPin)):
-	GPIO.setup(outPin[i], GPIO.OUT, initial=GPIO.HIGH)
+channelName = ['WCD-1', 'WCD-2']
+relayPin    = [ 6, 13]
+ledPin      = [19, 26]
+buttonPin   = [20, 21]
 
-def accState(roomNumber, accNumber):
-	if roomNumber == 0:
-		if GPIO.input(outPin[roomNumber][accNumber]) is 1:
-			return 'containerOff'
-		else:
-			return 'containerOn'
-	elif roomNumber > 0:
-		#get the state of other accesories in other rooms
-		return 'containerOff'
+# Define a threaded callback function to run in another thread when events are detected
+def button_handler(button, ignore_button = False):
+    if button == 20 and (ignore_button or GPIO.input(20) == 0):
+        state = not GPIO.input(6)
+        GPIO.output(6, state)
+        GPIO.output(19, state)
+    if button == 21 and (ignore_button or GPIO.input(21) == 0):
+        state = not GPIO.input(13)
+        GPIO.output(13, state)
+        GPIO.output(26, state)
+
+# configure the outputs
+for pin in relayPin + ledPin:
+    GPIO.setup(pin, GPIO.OUT, initial = GPIO.HIGH)
+
+# configure the inputs
+for pin in buttonPin:
+    GPIO.setup(pin, GPIO.IN)
+    GPIO.add_event_detect(pin, GPIO.FALLING, callback = button_handler, bouncetime = 500)
+
+def accState(channelNumber):
+    if GPIO.input(relayPin[channelNumber]) is 0:
+        return 'containerOff'
+    else:
+        return 'containerOn'
 
 @app.route("/")
 def main():
-	now = datetime.datetime.now()
-	timeString = now.strftime("%Y-%m-%d %I:%M %p")
+    now = datetime.datetime.now()
+    timeString = now.strftime("%Y-%m-%d %I:%M %p")
 
-	passer = ''
-	for i in range(len(roomName)):
-		passer = passer + "<p class='roomtitle'>%s</p>" % (roomName[i])
-		for j in range(len(accName[i])):
-			pinHtmlName = accName[i][j].replace(" ", "<br>")
-			passer = passer + "<button class='%s' formaction='/pin/%d/%d/'>%s</button>" % (accState(i,j), i, j, pinHtmlName)
+    passer = ''
+    for j in range(len(channelName)):
+        pinHtmlName = channelName[j].replace(" ", "<br>")
+        passer = passer + "<button class='%s' formaction='/pin/%d/'>%s</button>" % (accState(j), j, pinHtmlName)
 
-	buttonGrid = Markup(passer)
-	templateData = {
-		'title' : 'EasyOn',
-		'time': timeString,
-		'buttons' : buttonGrid
-	}
-	return render_template('main.html', **templateData)
+    buttonGrid = Markup(passer)
+    templateData = {
+        'title' : 'EasyOn',
+        'time': timeString,
+        'buttons' : buttonGrid
+    }
+    return render_template('main.html', **templateData)
 
-@app.route("/pin/<int:roomNumber>/<int:accNumber>/")
-def toggle(roomNumber, accNumber):
-	if len(outPin[roomNumber]) != 0:
-		state= not GPIO.input(outPin[roomNumber][accNumber])
-		GPIO.output(outPin[roomNumber][accNumber],state)
-		#subprocess.call(['./echo.sh'], shell=True)
-	else:
-		#action for other rooms
-		subprocess.call(['./echo.sh'], shell=True)
-	print(roomNumber, accNumber)
-	return redirect("/", code=302)
-
-
+@app.route("/pin/<int:channelNumber>/")
+def toggle(channelNumber):
+    button_handler(buttonPin[channelNumber], True)
+    return redirect("/", code=302)
 
 if __name__ == "__main__":
-   app.run(host='0.0.0.0', port=8000, debug=True)
+   app.run(host='0.0.0.0', port=8000, debug=False)
